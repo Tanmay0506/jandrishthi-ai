@@ -1,12 +1,10 @@
-streamlit
-pandas
-numpy
+streamlit==1.62.0
+pandas==2.3.3
+numpy==2.2.6
 python-dotenv
 google-genai
 pydantic
-
 folium
 streamlit-folium
-
 geopy
-streamlit-mic-recorder
+streamlit-mic-recorder==0.0.8
