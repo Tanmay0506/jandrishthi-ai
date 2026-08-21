@@ -4,7 +4,9 @@ numpy
 python-dotenv
 google-genai
 pydantic
+
+folium
 streamlit-folium
+
 geopy
 streamlit-mic-recorder
-folium
