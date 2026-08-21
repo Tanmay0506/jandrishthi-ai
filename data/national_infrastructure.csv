@@ -1,0 +1,21 @@
+state,district,population,road_access,water_access,healthcare_access,education_access,electricity_access,internet_access,infrastructure_gap,development_gap,existing_investment
+Bihar,Patna,5838465,68,72,61,74,91,67,51,48,420
+Bihar,Gaya,4379383,61,66,55,68,87,59,58,53,280
+Maharashtra,Pune,9429408,84,88,82,91,98,89,28,24,850
+Maharashtra,Satara,3003741,71,76,67,79,94,72,48,45,310
+Maharashtra,Nashik,6109052,76,81,73,84,96,79,39,36,470
+Uttar Pradesh,Lucknow,4588455,79,82,76,83,95,81,35,32,620
+Uttar Pradesh,Varanasi,3995817,70,75,65,77,92,73,46,43,390
+West Bengal,Kolkata,4496694,88,91,86,94,99,92,21,19,780
+Rajasthan,Jaipur,6626178,73,78,69,81,94,76,43,39,520
+Madhya Pradesh,Indore,3276697,78,82,72,85,96,83,36,31,410
+Gujarat,Ahmedabad,8255945,89,93,88,92,99,94,18,16,920
+Odisha,Bhubaneswar,837737,76,81,71,84,95,80,38,34,360
+Tamil Nadu,Chennai,7088000,91,94,89,95,99,96,14,12,1100
+Karnataka,Bengaluru,8443675,93,95,92,96,99,98,11,9,1250
+Jharkhand,Ranchi,1073421,64,69,57,71,88,61,55,51,240
+Chhattisgarh,Raipur,1010087,69,74,62,76,91,68,49,44,290
+Punjab,Ludhiana,1618879,82,87,79,88,98,90,27,23,430
+Haryana,Gurugram,876824,94,96,93,97,99,99,8,7,980
+Assam,Guwahati,957352,67,72,61,75,89,65,52,47,270
+Kerala,Kochi,677381,92,96,94,97,99,98,12,10,690
