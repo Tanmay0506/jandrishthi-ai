@@ -9,3 +9,4 @@ folium
 streamlit-folium
 plotly
 google-generativeai
+streamlit-mic-recorder
