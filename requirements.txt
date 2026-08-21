@@ -8,3 +8,4 @@ folium
 streamlit-folium
 geopy
 streamlit-mic-recorder==0.0.8
+scikit-learn
