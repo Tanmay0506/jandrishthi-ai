@@ -8,3 +8,4 @@ folium
 streamlit-folium
 geopy
 streamlit-mic-recorder
+folium
