@@ -7,7 +7,7 @@ from streamlit_mic_recorder import speech_to_text
 
 from ai.extractor import analyze_request
 from database.database import create_table, save_request
-from utils.geocoding import geocode_location
+from utils.geocoding import geocode_location, reverse_geocode_coordinates
 
 
 load_dotenv()
@@ -20,9 +20,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# -----------------------------
-# Session state
-# -----------------------------
 for key, default_value in {
     "request_text": "",
     "voice_text": "",
@@ -33,14 +30,12 @@ for key, default_value in {
 
 
 def safe_text(value, fallback="Unknown"):
-    """Escape values before placing them inside HTML."""
     if value is None or str(value).strip() == "":
         value = fallback
     return html.escape(str(value))
 
 
 def model_to_dict(result):
-    """Support Pydantic v1 and v2 response models."""
     if hasattr(result, "model_dump"):
         return result.model_dump()
     if hasattr(result, "dict"):
@@ -49,15 +44,14 @@ def model_to_dict(result):
 
 
 def population_display(value):
-    """Prevent formatting errors from non-numeric AI output."""
     try:
         return f"{int(value):,}"
     except (TypeError, ValueError):
         return safe_text(value, "Not available")
 
 
-def create_gps_location_data(gps_data):
-    """Keep browser GPS data compatible with your existing database logic."""
+def gps_fallback_data(gps_data):
+    """Save GPS coordinates even if reverse geocoding is temporarily unavailable."""
     latitude = float(gps_data["latitude"])
     longitude = float(gps_data["longitude"])
 
@@ -72,36 +66,30 @@ def create_gps_location_data(gps_data):
     }
 
 
-# -----------------------------
-# Premium dark UI
-# -----------------------------
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
     html, body, [class*="css"], .stApp {
-        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif !important;
     }
 
     .stApp {
         background-color: #050814;
         background-image:
-            radial-gradient(circle at 15% 50%, rgba(45, 212, 191, 0.05), transparent 25%),
-            radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.05), transparent 25%);
-        background-attachment: fixed;
+            radial-gradient(circle at 15% 50%, rgba(45,212,191,.05), transparent 25%),
+            radial-gradient(circle at 85% 30%, rgba(99,102,241,.05), transparent 25%);
         color: #f8fafc;
     }
 
-    /* Permanently hide Streamlit menu, toolbar, and sidebar. */
+    /* Permanently hide Streamlit sidebar and menu controls. */
     [data-testid="stSidebar"],
     [data-testid="stSidebarCollapsedControl"],
     [data-testid="collapsedControl"],
     button[aria-label="Open sidebar"],
     button[title="Open sidebar"],
-    #MainMenu,
-    footer,
-    header,
+    #MainMenu, footer, header,
     [data-testid="stToolbar"],
     [data-testid="stStatusWidget"] {
         display: none !important;
@@ -110,24 +98,15 @@ st.markdown(
     }
 
     .block-container {
+        max-width: 1320px !important;
         padding-top: 2.5rem !important;
         padding-bottom: 3rem !important;
-        max-width: 1320px !important;
-    }
-
-    * {
-        scroll-behavior: smooth;
-    }
-
-    ::selection {
-        background: rgba(45, 212, 191, 0.3);
-        color: #ffffff;
     }
 
     @keyframes pulseGlow {
-        0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.4); }
-        70% { box-shadow: 0 0 0 15px rgba(45, 212, 191, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+        0% { box-shadow: 0 0 0 0 rgba(45,212,191,.4); }
+        70% { box-shadow: 0 0 0 15px rgba(45,212,191,0); }
+        100% { box-shadow: 0 0 0 0 rgba(45,212,191,0); }
     }
 
     @keyframes gradientText {
@@ -138,17 +117,13 @@ st.markdown(
 
     .hero-wrapper {
         position: relative;
+        overflow: hidden;
         padding: 60px 70px;
         margin-bottom: 50px;
+        border: 1px solid rgba(255,255,255,.06);
         border-radius: 32px;
-        background: rgba(15, 23, 42, 0.4);
-        backdrop-filter: blur(20px) saturate(150%);
-        -webkit-backdrop-filter: blur(20px) saturate(150%);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        box-shadow:
-            0 30px 60px -10px rgba(0, 0, 0, 0.5),
-            inset 0 1px 0 rgba(255, 255, 255, 0.1);
-        overflow: hidden;
+        background: rgba(15,23,42,.45);
+        box-shadow: 0 30px 60px -10px rgba(0,0,0,.5);
     }
 
     .hero-wrapper::before {
@@ -158,21 +133,8 @@ st.markdown(
         left: -20%;
         width: 60%;
         height: 200%;
-        background: radial-gradient(circle, rgba(45, 212, 191, 0.15) 0%, transparent 60%);
+        background: radial-gradient(circle, rgba(45,212,191,.15), transparent 60%);
         transform: rotate(15deg);
-        pointer-events: none;
-    }
-
-    .hero-wrapper::after {
-        content: '';
-        position: absolute;
-        bottom: -50%;
-        right: -20%;
-        width: 60%;
-        height: 200%;
-        background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 60%);
-        transform: rotate(-15deg);
-        pointer-events: none;
     }
 
     .hero-title {
@@ -180,8 +142,6 @@ st.markdown(
         font-size: 64px;
         font-weight: 800;
         letter-spacing: -2px;
-        margin-bottom: 15px;
-        line-height: 1.1;
         background: linear-gradient(300deg, #2dd4bf, #6366f1, #2dd4bf);
         background-size: 200% auto;
         color: transparent;
@@ -192,64 +152,54 @@ st.markdown(
 
     .hero-subtitle {
         position: relative;
+        margin: 15px 0 20px;
         font-size: 24px;
         font-weight: 500;
         color: #e2e8f0;
-        margin-bottom: 25px;
     }
 
     .hero-description {
         position: relative;
         max-width: 700px;
+        margin-bottom: 30px;
         color: #94a3b8;
         font-size: 17px;
         line-height: 1.8;
-        margin-bottom: 35px;
     }
 
-    .badge-row {
-        position: relative;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-    }
+    .badge-row { position: relative; display: flex; flex-wrap: wrap; gap: 12px; }
 
     .modern-badge {
-        display: inline-flex;
-        align-items: center;
         padding: 8px 18px;
+        border: 1px solid rgba(255,255,255,.08);
         border-radius: 12px;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255,255,255,.03);
         color: #cbd5e1;
-        font-size: 13.5px;
+        font-size: 13px;
         font-weight: 600;
     }
 
     .section-header {
+        margin-top: 25px;
+        margin-bottom: 8px;
+        color: #fff;
         font-size: 28px;
         font-weight: 700;
-        color: #ffffff;
-        letter-spacing: -0.5px;
-        margin-top: 20px;
-        margin-bottom: 8px;
     }
 
     .section-caption {
+        margin-bottom: 25px;
         color: #64748b;
         font-size: 15px;
-        margin-bottom: 30px;
         line-height: 1.6;
     }
 
     .glass-panel {
-        background: rgba(15, 23, 42, 0.5);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        padding: 25px;
+        border: 1px solid rgba(255,255,255,.06);
         border-radius: 24px;
-        padding: 30px;
-        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+        background: rgba(15,23,42,.55);
+        box-shadow: 0 10px 30px -10px rgba(0,0,0,.5);
     }
 
     .ai-metric-grid {
@@ -260,11 +210,11 @@ st.markdown(
     }
 
     .ai-metric {
-        background: linear-gradient(145deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9));
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 20px;
-        padding: 24px;
         position: relative;
+        padding: 24px;
+        border: 1px solid rgba(255,255,255,.06);
+        border-radius: 20px;
+        background: linear-gradient(145deg, rgba(30,41,59,.7), rgba(15,23,42,.9));
     }
 
     .metric-dot {
@@ -279,41 +229,35 @@ st.markdown(
     }
 
     .ai-metric-label {
+        color: #94a3b8;
         font-size: 13px;
         font-weight: 600;
-        color: #94a3b8;
-        text-transform: uppercase;
         letter-spacing: 1px;
+        text-transform: uppercase;
     }
 
     .ai-metric-value {
         margin-top: 8px;
-        font-size: 25px;
+        color: #fff;
+        font-size: 24px;
         font-weight: 800;
-        color: #ffffff;
         overflow-wrap: anywhere;
     }
 
     .info-row {
         display: flex;
-        align-items: flex-start;
         gap: 16px;
         padding: 14px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        font-size: 15px;
+        border-bottom: 1px solid rgba(255,255,255,.05);
         line-height: 1.6;
     }
 
-    .info-row:last-child {
-        border-bottom: none;
-        padding-bottom: 0;
-    }
+    .info-row:last-child { border-bottom: none; }
 
     .info-label {
-        font-weight: 600;
-        color: #64748b;
         min-width: 140px;
-        flex-shrink: 0;
+        color: #64748b;
+        font-weight: 600;
     }
 
     .info-value {
@@ -323,62 +267,45 @@ st.markdown(
     }
 
     div[data-testid="stTabs"] button {
-        background: transparent !important;
         border: none !important;
+        border-bottom: 2px solid transparent !important;
+        background: transparent !important;
         color: #64748b !important;
         font-size: 16px !important;
         font-weight: 600 !important;
-        padding: 10px 20px !important;
-        border-bottom: 2px solid transparent !important;
     }
 
     div[data-testid="stTabs"] button[aria-selected="true"] {
+        border-bottom-color: #2dd4bf !important;
         color: #2dd4bf !important;
-        border-bottom: 2px solid #2dd4bf !important;
     }
 
     .stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #0d9488 0%, #3b82f6 100%) !important;
-        color: #ffffff !important;
-        border-radius: 16px !important;
-        font-weight: 700 !important;
-        font-size: 18px !important;
-        padding: 1.15rem 2rem !important;
         border: none !important;
+        border-radius: 16px !important;
+        background: linear-gradient(135deg, #0d9488, #3b82f6) !important;
+        color: #fff !important;
+        font-size: 18px !important;
+        font-weight: 700 !important;
+        padding: 1.1rem 2rem !important;
         animation: pulseGlow 3s infinite;
     }
 
-    .stTextArea textarea,
-    .stTextInput input,
-    .stSelectbox > div > div {
-        background-color: rgba(15, 23, 42, 0.4) !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    .stTextArea textarea, .stTextInput input, .stSelectbox > div > div {
+        border: 1px solid rgba(255,255,255,.12) !important;
         border-radius: 16px !important;
+        background: rgba(15,23,42,.5) !important;
         color: #f8fafc !important;
     }
 
-    div[data-testid="stAlert"],
-    div[data-testid="stExpanderDetails"] {
-        border-radius: 16px !important;
-        border: 1px solid rgba(255, 255, 255, 0.06) !important;
-        backdrop-filter: blur(10px);
-    }
-
     iframe {
+        border: 1px solid rgba(255,255,255,.1) !important;
         border-radius: 20px !important;
-        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    }
-
-    hr {
-        border: none !important;
-        height: 1px !important;
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent) !important;
-        margin: 40px 0 !important;
     }
 
     @media (max-width: 768px) {
         .block-container { padding: 1.2rem !important; }
-        .hero-wrapper { padding: 36px 28px; }
+        .hero-wrapper { padding: 35px 28px; }
         .hero-title { font-size: 42px; }
         .hero-subtitle { font-size: 19px; }
         .info-row { flex-direction: column; gap: 4px; }
@@ -388,17 +315,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -----------------------------
-# Hero section
-# -----------------------------
 st.markdown(
     """
     <div class="hero-wrapper">
         <div class="hero-title">JanDrishti AI</div>
         <div class="hero-subtitle">Elevating Citizen Voices to Infrastructure Intelligence</div>
         <div class="hero-description">
-            Empowering communities across India. We transform everyday infrastructure
-            concerns into structured, location-aware intelligence for faster action.
+            Transforming citizen concerns into structured and location-aware
+            intelligence for faster infrastructure action.
         </div>
         <div class="badge-row">
             <span class="modern-badge">✨ Next-Gen AI Analysis</span>
@@ -411,24 +335,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -----------------------------
-# Complaint submission
-# -----------------------------
 st.markdown('<div class="section-header">🗣️ Voice Your Concern</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="section-caption">Describe the infrastructure issue by text or voice.</div>',
+    '<div class="section-caption">Describe the issue using text or voice.</div>',
     unsafe_allow_html=True,
 )
 
-tab_text, tab_voice = st.tabs(["⌨️ Text Submission", "🎙️ Voice Submission"])
+text_tab, voice_tab = st.tabs(["⌨️ Text Submission", "🎙️ Voice Submission"])
 
-with tab_text:
+with text_tab:
     st.markdown(
         """
         <div class="glass-panel" style="margin-bottom:15px; padding:20px;">
             <h4 style="margin:0; color:#f8fafc;">Detailed Description</h4>
             <p style="margin:5px 0 0; color:#94a3b8;">
-                Include the issue, nearby landmarks, and its impact on the community.
+                Include the issue, nearby landmarks, and impact on your community.
             </p>
         </div>
         """,
@@ -446,34 +367,19 @@ with tab_text:
         label_visibility="collapsed",
     )
 
-with tab_voice:
-    st.markdown(
-        """
-        <div class="glass-panel" style="margin-bottom:15px; padding:20px;">
-            <h4 style="margin:0; color:#f8fafc;">Speak Naturally</h4>
-            <p style="margin:5px 0 0; color:#94a3b8;">
-                Choose a language and record your concern. JanDrishti will transcribe it.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+with voice_tab:
     language_codes = {
         "English": "en-IN",
         "Hindi": "hi-IN",
         "Marathi": "mr-IN",
     }
 
-    language_col, mic_col = st.columns([1, 2])
+    left_col, right_col = st.columns([1, 2])
 
-    with language_col:
-        voice_language = st.selectbox(
-            "Select Language",
-            list(language_codes),
-        )
+    with left_col:
+        voice_language = st.selectbox("Select Language", list(language_codes))
 
-    with mic_col:
+    with right_col:
         try:
             voice_result = speech_to_text(
                 language=language_codes[voice_language],
@@ -494,15 +400,12 @@ with tab_voice:
         st.success("✅ Transcription Captured")
         st.info(f'"{st.session_state.voice_text}"')
 
-# -----------------------------
-# Location selection
-# -----------------------------
 st.markdown('<div class="section-header">📍 Pinpoint the Location</div>', unsafe_allow_html=True)
 st.markdown(
     """
     <div class="section-caption">
-        Use precise current location for GPS coordinates, enter a location manually,
-        or let JanDrishti extract it from your complaint.
+        Use precise current location for GPS coordinates and automatic district/state,
+        or enter a location manually.
     </div>
     """,
     unsafe_allow_html=True,
@@ -532,29 +435,18 @@ if use_precise_location:
         st.session_state.precise_location = None
 
     if st.session_state.precise_location:
-        latitude = float(st.session_state.precise_location["latitude"])
-        longitude = float(st.session_state.precise_location["longitude"])
-        accuracy = st.session_state.precise_location.get("accuracy")
-
-        accuracy_text = ""
-        if accuracy is not None:
-            accuracy_text = f" · Accuracy: approximately {float(accuracy):.0f} m"
-
+        gps = st.session_state.precise_location
         st.success(
-            f"✓ Precise coordinates captured: {latitude:.6f}, {longitude:.6f}"
-            f"{accuracy_text}"
+            f"✓ Coordinates captured: {float(gps['latitude']):.6f}, "
+            f"{float(gps['longitude']):.6f}"
         )
 
 location_input = st.text_input(
     "Manual Location Override (Optional)",
     placeholder="e.g., Kothrud, Pune, Maharashtra",
-    help="Leave blank to use precise location or AI location extraction.",
     disabled=use_precise_location,
 )
 
-# -----------------------------
-# AI analysis execution
-# -----------------------------
 st.write("")
 analyze_clicked = st.button(
     "🚀 Initiate AI Analysis",
@@ -575,23 +467,32 @@ if analyze_clicked:
             result = analyze_request(request_text)
             st.write("✅ Contextual analysis generated.")
 
-            # GPS path: coordinates are used directly. No geocoding call is made.
+            # Precise GPS: GPS coordinates → reverse geocoding → locality/district/state.
             if use_precise_location:
-                gps_data = st.session_state.precise_location
+                gps = st.session_state.precise_location
 
-                if not gps_data:
+                if not gps:
                     status.update(label="📍 Precise location required", state="error")
                     st.error(
-                        "Tap the location button, allow browser location access, "
-                        "then start the analysis again."
+                        "Allow browser location access, capture coordinates, "
+                        "then start analysis again."
                     )
                     st.stop()
 
-                location_data = create_gps_location_data(gps_data)
+                latitude = float(gps["latitude"])
+                longitude = float(gps["longitude"])
+
+                st.write("🛰️ Identifying locality, district, and state...")
+                location_data = reverse_geocode_coordinates(latitude, longitude)
+
+                # Do not fail complaint submission when reverse geocoding is unavailable.
+                if location_data is None:
+                    location_data = gps_fallback_data(gps)
+
                 resolved_input = location_data["display_name"]
                 location_source = "Precise Current Location"
 
-            # Manual/AI path: uses your existing geocoding.py
+            # Manual / AI location: place name → geocoding.
             else:
                 if location_input.strip():
                     resolved_input = location_input.strip()
@@ -603,7 +504,7 @@ if analyze_clicked:
                 if not resolved_input or resolved_input.lower() == "unknown":
                     status.update(label="📍 Location required", state="error")
                     st.error(
-                        "No valid location was detected. Enter a precise location "
+                        "No valid location was detected. Enter a location manually "
                         "or use precise current location."
                     )
                     st.stop()
@@ -614,8 +515,8 @@ if analyze_clicked:
                 if location_data is None:
                     status.update(label="❌ Geocoding Failed", state="error")
                     st.error(
-                        f"Could not map '{resolved_input}'. Use precise current "
-                        "location or try a broader city or district."
+                        "Could not map that location. Use precise current location "
+                        "for direct GPS coordinates."
                     )
                     st.stop()
 
@@ -630,9 +531,6 @@ if analyze_clicked:
                 state="complete",
             )
 
-            # -------------------------
-            # Results UI
-            # -------------------------
             st.markdown("---")
             st.markdown(
                 '<div class="section-header">📊 Intelligence Dossier</div>',
@@ -674,7 +572,7 @@ if analyze_clicked:
                 unsafe_allow_html=True,
             )
 
-            details_col, geographic_col = st.columns([1.2, 1])
+            details_col, location_col = st.columns([1.2, 1])
 
             with details_col:
                 st.markdown("##### 🧠 Contextual Extraction")
@@ -690,7 +588,7 @@ if analyze_clicked:
                     unsafe_allow_html=True,
                 )
 
-            with geographic_col:
+            with location_col:
                 st.markdown("##### 📍 Geographic Node")
 
                 source_styles = {
@@ -705,12 +603,12 @@ if analyze_clicked:
 
                 st.markdown(
                     f"""
-                    <div style="margin-bottom:15px; padding:10px 16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:12px;">
+                    <div style="margin-bottom:15px; padding:10px 16px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.05); border-radius:12px;">
                         <span>{source_icon}</span>
                         <span style="color:#94a3b8; font-size:13px;"> Source:</span>
                         <strong style="color:{source_color};"> {safe_text(location_source)}</strong>
                     </div>
-                    <div class="glass-panel" style="padding:24px;">
+                    <div class="glass-panel">
                         <div class="info-row"><span class="info-label">Locality / City</span><span class="info-value">{safe_text(location_data.get("village"))}</span></div>
                         <div class="info-row"><span class="info-label">District</span><span class="info-value">{safe_text(location_data.get("district"))}</span></div>
                         <div class="info-row"><span class="info-label">State Region</span><span class="info-value">{safe_text(location_data.get("state"))}</span></div>
@@ -741,19 +639,16 @@ if analyze_clicked:
                     zoom=15,
                 )
 
-            with st.expander("📄 View Raw Transcription / Source Text", expanded=False):
+            with st.expander("📄 View Raw Transcription / Source Text"):
                 st.markdown(
                     f"<div style='color:#e2e8f0; line-height:1.6;'>{safe_text(request_text)}</div>",
                     unsafe_allow_html=True,
                 )
 
-            with st.expander("💻 Developer Mode: JSON Payload", expanded=False):
+            with st.expander("💻 Developer Mode: JSON Payload"):
                 st.json(
                     {
-                        "metadata": {
-                            "status": "success",
-                            "timestamp": "auto-generated",
-                        },
+                        "metadata": {"status": "success"},
                         "ai_inference": model_to_dict(result),
                         "spatial_data": location_data,
                     }
@@ -764,12 +659,9 @@ if analyze_clicked:
             st.error("A critical error occurred while processing the request.")
             st.exception(error)
 
-# -----------------------------
-# Footer
-# -----------------------------
 st.markdown(
     """
-    <div style="text-align:center; margin-top:80px; padding:40px 0; border-top:1px solid rgba(255,255,255,0.05);">
+    <div style="text-align:center; margin-top:80px; padding:40px 0; border-top:1px solid rgba(255,255,255,.05);">
         <div style="font-size:18px; font-weight:700; color:#e2e8f0; margin-bottom:8px;">
             🇮🇳 JanDrishti AI
         </div>
