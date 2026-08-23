@@ -1,18 +1,20 @@
-import streamlit as st
-from streamlit_mic_recorder import speech_to_text
-from dotenv import load_dotenv
+import html
 
-# User's custom modules (assumed to exist in their environment)
+import streamlit as st
+from dotenv import load_dotenv
+from streamlit_mic_recorder import speech_to_text
+
 from ai.extractor import analyze_request
 from database.database import create_table, save_request
 from utils.geocoding import geocode_location
+
 
 load_dotenv()
 create_table()
 
 st.set_page_config(
     page_title="JanDrishti AI",
-    page_icon="IN",
+    page_icon="🇮🇳",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -20,493 +22,424 @@ st.set_page_config(
 # -----------------------------
 # Session state
 # -----------------------------
-if "request_text" not in st.session_state:
-    st.session_state.request_text = ""
-if "voice_text" not in st.session_state:
-    st.session_state.voice_text = ""
+for key, default_value in {
+    "request_text": "",
+    "voice_text": "",
+}.items():
+    if key not in st.session_state:
+        st.session_state[key] = default_value
+
+
+def safe_text(value, fallback="Unknown"):
+    """Safely render text values inside custom HTML."""
+    if value is None or str(value).strip() == "":
+        value = fallback
+    return html.escape(str(value))
+
+
+def model_to_dict(result):
+    """Support Pydantic v1 and v2 models."""
+    if hasattr(result, "model_dump"):
+        return result.model_dump()
+    if hasattr(result, "dict"):
+        return result.dict()
+    return vars(result)
+
+
+def population_display(value):
+    """Prevent formatting errors if the AI returns non-numeric data."""
+    try:
+        return f"{int(value):,}"
+    except (TypeError, ValueError):
+        return safe_text(value, "Not available")
+
 
 # -----------------------------
-# Premium Dark CSS & Animations
+# Premium Dark CSS
 # -----------------------------
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
-/* ========== GLOBAL RESET & TYPOGRAPHY ========== */
-html, body, [class*="css"], .stApp {
-    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
-}
+    html, body, [class*="css"], .stApp {
+        font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
+    }
 
-.stApp {
-    background-color: #050814;
-    background-image: 
-        radial-gradient(circle at 15% 50%, rgba(45, 212, 191, 0.05), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.05), transparent 25%);
-    background-attachment: fixed;
-    color: #f8fafc;
-}
+    .stApp {
+        background-color: #050814;
+        background-image:
+            radial-gradient(circle at 15% 50%, rgba(45, 212, 191, 0.05), transparent 25%),
+            radial-gradient(circle at 85% 30%, rgba(99, 102, 241, 0.05), transparent 25%);
+        background-attachment: fixed;
+        color: #f8fafc;
+    }
 
-/* Hide Streamlit chrome */
-#MainMenu, footer, header {visibility: hidden;}
-div[data-testid="stToolbar"] {display: none;}
+    /* Permanently hide Streamlit menu, toolbar, and sidebar. */
+    [data-testid="stSidebar"],
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="collapsedControl"],
+    button[aria-label="Open sidebar"],
+    button[title="Open sidebar"],
+    #MainMenu,
+    footer,
+    header,
+    [data-testid="stToolbar"],
+    [data-testid="stStatusWidget"] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
 
-/* Smooth scrolling & selection */
-* {
-    scroll-behavior: smooth;
-}
+    .block-container {
+        padding-top: 2.5rem !important;
+        padding-bottom: 3rem !important;
+        max-width: 1320px !important;
+    }
 
-::selection {
-    background: rgba(45, 212, 191, 0.3);
-    color: #ffffff;
-}
+    * {
+        scroll-behavior: smooth;
+    }
 
-/* ========== ANIMATIONS ========== */
-@keyframes float {
-    0% { transform: translateY(0px); }
-    50% { transform: translateY(-10px); }
-    100% { transform: translateY(0px); }
-}
+    ::selection {
+        background: rgba(45, 212, 191, 0.3);
+        color: #ffffff;
+    }
 
-@keyframes pulseGlow {
-    0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.4); }
-    70% { box-shadow: 0 0 0 15px rgba(45, 212, 191, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
-}
+    @keyframes pulseGlow {
+        0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.4); }
+        70% { box-shadow: 0 0 0 15px rgba(45, 212, 191, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+    }
 
-@keyframes gradientText {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
+    @keyframes gradientText {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
 
-/* ========== HERO SECTION ========== */
-.hero-wrapper {
-    position: relative;
-    padding: 60px 70px;
-    margin-bottom: 50px;
-    border-radius: 32px;
-    background: rgba(15, 23, 42, 0.4);
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    box-shadow: 
-        0 30px 60px -10px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    overflow: hidden;
-    z-index: 1;
-}
+    .hero-wrapper {
+        position: relative;
+        padding: 60px 70px;
+        margin-bottom: 50px;
+        border-radius: 32px;
+        background: rgba(15, 23, 42, 0.4);
+        backdrop-filter: blur(20px) saturate(150%);
+        -webkit-backdrop-filter: blur(20px) saturate(150%);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        box-shadow:
+            0 30px 60px -10px rgba(0, 0, 0, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        overflow: hidden;
+    }
 
-/* Decorative Glows inside Hero */
-.hero-wrapper::before {
-    content: '';
-    position: absolute;
-    top: -50%; left: -20%;
-    width: 60%; height: 200%;
-    background: radial-gradient(circle, rgba(45, 212, 191, 0.15) 0%, transparent 60%);
-    transform: rotate(15deg);
-    pointer-events: none;
-    z-index: -1;
-}
+    .hero-wrapper::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -20%;
+        width: 60%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(45, 212, 191, 0.15) 0%, transparent 60%);
+        transform: rotate(15deg);
+        pointer-events: none;
+    }
 
-.hero-wrapper::after {
-    content: '';
-    position: absolute;
-    bottom: -50%; right: -20%;
-    width: 60%; height: 200%;
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 60%);
-    transform: rotate(-15deg);
-    pointer-events: none;
-    z-index: -1;
-}
+    .hero-wrapper::after {
+        content: '';
+        position: absolute;
+        bottom: -50%;
+        right: -20%;
+        width: 60%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 60%);
+        transform: rotate(-15deg);
+        pointer-events: none;
+    }
 
-.hero-title {
-    font-size: 64px;
-    font-weight: 800;
-    letter-spacing: -2px;
-    margin-bottom: 15px;
-    line-height: 1.1;
-    background: linear-gradient(300deg, #2dd4bf, #6366f1, #2dd4bf);
-    background-size: 200% auto;
-    color: transparent;
-    -webkit-background-clip: text;
-    background-clip: text;
-    animation: gradientText 6s linear infinite;
-}
+    .hero-title {
+        position: relative;
+        font-size: 64px;
+        font-weight: 800;
+        letter-spacing: -2px;
+        margin-bottom: 15px;
+        line-height: 1.1;
+        background: linear-gradient(300deg, #2dd4bf, #6366f1, #2dd4bf);
+        background-size: 200% auto;
+        color: transparent;
+        -webkit-background-clip: text;
+        background-clip: text;
+        animation: gradientText 6s linear infinite;
+    }
 
-.hero-subtitle {
-    font-size: 24px;
-    font-weight: 500;
-    color: #e2e8f0;
-    margin-bottom: 25px;
-    letter-spacing: -0.5px;
-}
+    .hero-subtitle {
+        position: relative;
+        font-size: 24px;
+        font-weight: 500;
+        color: #e2e8f0;
+        margin-bottom: 25px;
+    }
 
-.hero-description {
-    max-width: 680px;
-    color: #94a3b8;
-    font-size: 17px;
-    line-height: 1.8;
-    margin-bottom: 35px;
-    font-weight: 400;
-}
+    .hero-description {
+        position: relative;
+        max-width: 700px;
+        color: #94a3b8;
+        font-size: 17px;
+        line-height: 1.8;
+        margin-bottom: 35px;
+    }
 
-.badge-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-}
+    .badge-row {
+        position: relative;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
 
-.modern-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 18px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    color: #cbd5e1;
-    font-size: 13.5px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    transition: all 0.3s ease;
-}
+    .modern-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 8px 18px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: #cbd5e1;
+        font-size: 13.5px;
+        font-weight: 600;
+    }
 
-.modern-badge:hover {
-    background: rgba(45, 212, 191, 0.1);
-    border-color: rgba(45, 212, 191, 0.4);
-    color: #2dd4bf;
-    transform: translateY(-2px);
-}
+    .section-header {
+        font-size: 28px;
+        font-weight: 700;
+        color: #ffffff;
+        letter-spacing: -0.5px;
+        margin-top: 20px;
+        margin-bottom: 8px;
+    }
 
-/* ========== SECTION HEADERS ========== */
-.section-header {
-    font-size: 28px;
-    font-weight: 700;
-    color: #ffffff;
-    letter-spacing: -0.5px;
-    margin-top: 20px;
-    margin-bottom: 8px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
+    .section-caption {
+        color: #64748b;
+        font-size: 15px;
+        margin-bottom: 30px;
+        line-height: 1.6;
+    }
 
-.section-caption {
-    color: #64748b;
-    font-size: 15px;
-    margin-bottom: 30px;
-    line-height: 1.6;
-}
+    .glass-panel {
+        background: rgba(15, 23, 42, 0.5);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 24px;
+        padding: 30px;
+        box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    }
 
-/* ========== ADVANCED GLASS CARDS ========== */
-.glass-panel {
-    background: rgba(15, 23, 42, 0.5);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 24px;
-    padding: 30px;
-    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-    box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
-    position: relative;
-    overflow: hidden;
-}
+    .ai-metric-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
 
-.glass-panel::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
-}
+    .ai-metric {
+        background: linear-gradient(145deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9));
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: 20px;
+        padding: 24px;
+        position: relative;
+    }
 
-.glass-panel:hover {
-    border-color: rgba(45, 212, 191, 0.3);
-    transform: translateY(-5px);
-    box-shadow: 0 20px 40px -15px rgba(0,0,0,0.7), 0 0 20px rgba(45, 212, 191, 0.1);
-}
+    .metric-dot {
+        position: absolute;
+        top: 24px;
+        right: 24px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #2dd4bf;
+        box-shadow: 0 0 10px #2dd4bf;
+    }
 
-/* ========== METRIC CARDS OVERHAUL ========== */
-.ai-metric-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
-}
+    .ai-metric-label {
+        font-size: 13px;
+        font-weight: 600;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
 
-.ai-metric {
-    background: linear-gradient(145deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.9));
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 20px;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    transition: all 0.3s ease;
-    position: relative;
-}
+    .ai-metric-value {
+        margin-top: 8px;
+        font-size: 25px;
+        font-weight: 800;
+        color: #ffffff;
+        overflow-wrap: anywhere;
+    }
 
-.ai-metric:hover {
-    transform: translateY(-5px) scale(1.02);
-    border-color: rgba(99, 102, 241, 0.4);
-    box-shadow: 0 15px 30px -10px rgba(99, 102, 241, 0.2);
-}
+    .info-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        padding: 14px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        font-size: 15px;
+        line-height: 1.6;
+    }
 
-.metric-dot {
-    position: absolute;
-    top: 24px;
-    right: 24px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #2dd4bf;
-    box-shadow: 0 0 10px #2dd4bf;
-    animation: pulse 2s infinite;
-}
+    .info-row:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+    }
 
-.ai-metric-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-}
+    .info-label {
+        font-weight: 600;
+        color: #64748b;
+        min-width: 140px;
+        flex-shrink: 0;
+    }
 
-.ai-metric-value {
-    font-size: 28px;
-    font-weight: 800;
-    color: #ffffff;
-    background: linear-gradient(to right, #ffffff, #a5b4fc);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-}
+    .info-value {
+        color: #f1f5f9;
+        font-weight: 500;
+        overflow-wrap: anywhere;
+    }
 
-/* ========== INFO ROWS ========== */
-.info-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 16px;
-    padding: 14px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.05);
-    font-size: 15px;
-    line-height: 1.6;
-}
-.info-row:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-}
+    div[data-testid="stTabs"] button {
+        background: transparent !important;
+        border: none !important;
+        color: #64748b !important;
+        font-size: 16px !important;
+        font-weight: 600 !important;
+        padding: 10px 20px !important;
+        border-bottom: 2px solid transparent !important;
+    }
 
-.info-label {
-    font-weight: 600;
-    color: #64748b;
-    min-width: 140px;
-    flex-shrink: 0;
-}
+    div[data-testid="stTabs"] button[aria-selected="true"] {
+        color: #2dd4bf !important;
+        border-bottom: 2px solid #2dd4bf !important;
+    }
 
-.info-value {
-    color: #f1f5f9;
-    font-weight: 500;
-}
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #0d9488 0%, #3b82f6 100%) !important;
+        color: #ffffff !important;
+        border-radius: 16px !important;
+        font-weight: 700 !important;
+        font-size: 18px !important;
+        padding: 1.15rem 2rem !important;
+        border: none !important;
+        animation: pulseGlow 3s infinite;
+    }
 
-/* ========== STREAMLIT COMPONENT OVERRIDES ========== */
+    .stTextArea textarea,
+    .stTextInput input,
+    .stSelectbox > div > div {
+        background-color: rgba(15, 23, 42, 0.4) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 16px !important;
+        color: #f8fafc !important;
+    }
 
-/* Tabs */
-div[data-testid="stTabs"] {
-    background: transparent;
-}
-div[data-testid="stTabs"] button {
-    background: transparent !important;
-    border: none !important;
-    color: #64748b !important;
-    font-size: 16px !important;
-    font-weight: 600 !important;
-    padding: 10px 20px !important;
-    border-bottom: 2px solid transparent !important;
-    transition: all 0.3s ease !important;
-}
-div[data-testid="stTabs"] button[aria-selected="true"] {
-    color: #2dd4bf !important;
-    border-bottom: 2px solid #2dd4bf !important;
-}
+    div[data-testid="stAlert"],
+    div[data-testid="stExpanderDetails"] {
+        border-radius: 16px !important;
+        border: 1px solid rgba(255, 255, 255, 0.06) !important;
+        backdrop-filter: blur(10px);
+    }
 
-/* Primary Button (Analyze) */
-.stButton > button[kind="primary"] {
-    background: linear-gradient(135deg, #0d9488 0%, #3b82f6 100%) !important;
-    color: #ffffff !important;
-    border-radius: 16px !important;
-    font-weight: 700 !important;
-    font-size: 18px !important;
-    padding: 1.2rem 2rem !important;
-    border: none !important;
-    box-shadow: 
-        0 10px 25px -5px rgba(59, 130, 246, 0.4),
-        inset 0 1px 1px rgba(255, 255, 255, 0.2) !important;
-    transition: all 0.3s ease !important;
-    animation: pulseGlow 3s infinite;
-}
+    iframe {
+        border-radius: 20px !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
 
-.stButton > button[kind="primary"]:hover {
-    transform: translateY(-3px) scale(1.01) !important;
-    box-shadow: 
-        0 15px 35px -5px rgba(59, 130, 246, 0.6),
-        inset 0 1px 1px rgba(255, 255, 255, 0.3) !important;
-}
+    hr {
+        border: none !important;
+        height: 1px !important;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.12), transparent) !important;
+        margin: 40px 0 !important;
+    }
 
-/* Inputs */
-.stTextArea textarea, 
-.stTextInput input,
-.stSelectbox > div > div {
-    background-color: rgba(15, 23, 42, 0.4) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 16px !important;
-    color: #f8fafc !important;
-    padding: 14px !important;
-    font-size: 15px !important;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease !important;
-}
-
-.stTextArea textarea:focus, 
-.stTextInput input:focus,
-.stSelectbox > div > div:focus-within {
-    background-color: rgba(15, 23, 42, 0.6) !important;
-    border-color: #2dd4bf !important;
-    box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.15) !important;
-}
-
-/* Status / Alerts */
-div[data-testid="stStatusWidget"] {
-    background: rgba(15, 23, 42, 0.6) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: 16px !important;
-    backdrop-filter: blur(10px);
-}
-
-div[data-testid="stAlert"] {
-    border-radius: 16px !important;
-    border: 1px solid rgba(255,255,255,0.05) !important;
-    backdrop-filter: blur(10px);
-}
-
-/* Expander */
-.streamlit-expanderHeader {
-    background: rgba(30, 41, 59, 0.5) !important;
-    border-radius: 14px !important;
-    font-weight: 600 !important;
-    color: #e2e8f0 !important;
-    border: 1px solid rgba(255,255,255,0.03) !important;
-}
-div[data-testid="stExpanderDetails"] {
-    background: rgba(15, 23, 42, 0.3) !important;
-    border-bottom-left-radius: 14px !important;
-    border-bottom-right-radius: 14px !important;
-    border: 1px solid rgba(255,255,255,0.03) !important;
-    border-top: none !important;
-}
-
-/* Map container */
-iframe {
-    border-radius: 20px !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5) !important;
-}
-
-/* Divider */
-hr {
-    border: none !important;
-    height: 1px !important;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent) !important;
-    margin: 40px 0 !important;
-}
-
-/* Scrollbar */
-::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-}
-::-webkit-scrollbar-track {
-    background: #050814;
-}
-::-webkit-scrollbar-thumb {
-    background: #1e293b;
-    border-radius: 5px;
-}
-::-webkit-scrollbar-thumb:hover {
-    background: #334155;
-}
-</style>
-""", unsafe_allow_html=True)
+    @media (max-width: 768px) {
+        .block-container { padding: 1.2rem !important; }
+        .hero-wrapper { padding: 36px 28px; }
+        .hero-title { font-size: 42px; }
+        .hero-subtitle { font-size: 19px; }
+        .info-row { flex-direction: column; gap: 4px; }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # -----------------------------
-# Hero Section
+# Hero section
 # -----------------------------
-st.markdown("""
-<div class="hero-wrapper">
-    <div class="hero-title">JanDrishti AI</div>
-    <div class="hero-subtitle">Elevating Citizen Voices to Infrastructure Intelligence</div>
-    <div class="hero-description">
-        Empowering communities across India. We transform your everyday infrastructural challenges 
-        into structured, highly-accurate, and location-aware data, equipping policymakers 
-        with the intelligence they need to act instantly.
+st.markdown(
+    """
+    <div class="hero-wrapper">
+        <div class="hero-title">JanDrishti AI</div>
+        <div class="hero-subtitle">Elevating Citizen Voices to Infrastructure Intelligence</div>
+        <div class="hero-description">
+            Empowering communities across India. We transform everyday infrastructure
+            concerns into structured, location-aware intelligence for faster action.
+        </div>
+        <div class="badge-row">
+            <span class="modern-badge">✨ Next-Gen AI Analysis</span>
+            <span class="modern-badge">🎙️ Multi-lingual Voice</span>
+            <span class="modern-badge">🛰️ Precision Mapping</span>
+            <span class="modern-badge">🇮🇳 Built for India</span>
+        </div>
     </div>
-    <div class="badge-row">
-        <span class="modern-badge">✨ Next-Gen AI Analysis</span>
-        <span class="modern-badge">🎙️ Multi-lingual Voice</span>
-        <span class="modern-badge">🛰️ Precision Mapping</span>
-        <span class="modern-badge">🇮🇳 Built for India</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 # -----------------------------
-# Submit Request
+# Complaint submission
 # -----------------------------
 st.markdown('<div class="section-header">🗣️ Voice Your Concern</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="section-caption">Choose your preferred method to inform JanDrishti about infrastructural issues in your area.</div>',
-    unsafe_allow_html=True
+    '<div class="section-caption">Describe the infrastructure issue by text or voice.</div>',
+    unsafe_allow_html=True,
 )
 
-# Replacing the old radio button with native Streamlit tabs for a cleaner UI
-tab1, tab2 = st.tabs(["⌨️ Text Submission", "🎙️ Voice Submission"])
+tab_text, tab_voice = st.tabs(["⌨️ Text Submission", "🎙️ Voice Submission"])
 
-with tab1:
-    st.markdown("""
-    <div class="glass-panel" style="margin-bottom: 15px; padding: 20px;">
-        <h4 style="margin:0; color:#f8fafc; font-size: 16px;">Detailed Description</h4>
-        <p style="margin:5px 0 0 0; color:#94a3b8; font-size: 14px;">
-            Provide specific details about the issue, including landmarks and how it affects the community.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    text = st.text_area(
+with tab_text:
+    st.markdown(
+        """
+        <div class="glass-panel" style="margin-bottom:15px; padding:20px;">
+            <h4 style="margin:0; color:#f8fafc;">Detailed Description</h4>
+            <p style="margin:5px 0 0; color:#94a3b8;">
+                Include the issue, nearby landmarks, and its impact on the community.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.session_state.request_text = st.text_area(
         "Citizen complaint",
         value=st.session_state.request_text,
-        placeholder="Example: The main road near Shivaji Chowk in Pune is severely potholed after the recent rains, causing massive traffic blocks and accidents.",
+        placeholder=(
+            "Example: The main road near Shivaji Chowk in Pune is severely "
+            "potholed after the rains, causing traffic and accidents."
+        ),
         height=180,
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
-    st.session_state.request_text = text
 
-with tab2:
-    st.markdown("""
-    <div class="glass-panel" style="margin-bottom: 15px; padding: 20px;">
-        <h4 style="margin:0; color:#f8fafc; font-size: 16px;">Speak Naturally</h4>
-        <p style="margin:5px 0 0 0; color:#94a3b8; font-size: 14px;">
-            Select your language and tap the microphone. Our AI will instantly transcribe and translate your concern.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    col_lang, col_mic = st.columns([1, 2])
-    
-    with col_lang:
-        voice_language = st.selectbox(
-            "Select Language",
-            ["English", "Hindi", "Marathi"],
-            help="Choose the language you are most comfortable speaking in."
-        )
+with tab_voice:
+    st.markdown(
+        """
+        <div class="glass-panel" style="margin-bottom:15px; padding:20px;">
+            <h4 style="margin:0; color:#f8fafc;">Speak Naturally</h4>
+            <p style="margin:5px 0 0; color:#94a3b8;">
+                Choose a language and record your concern. JanDrishti will transcribe it.
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     language_codes = {
         "English": "en-IN",
@@ -514,9 +447,15 @@ with tab2:
         "Marathi": "mr-IN",
     }
 
-    with col_mic:
-        st.write("") # spacing
-        st.write("")
+    language_col, mic_col = st.columns([1, 2])
+
+    with language_col:
+        voice_language = st.selectbox(
+            "Select Language",
+            list(language_codes),
+        )
+
+    with mic_col:
         try:
             voice_result = speech_to_text(
                 language=language_codes[voice_language],
@@ -525,46 +464,42 @@ with tab2:
                 just_once=True,
                 use_container_width=True,
             )
+
             if voice_result:
                 st.session_state.voice_text = voice_result
                 st.session_state.request_text = voice_result
-        except Exception as e:
-            st.error(f"Voice recorder encountered an issue: {e}")
+
+        except Exception as error:
+            st.error(f"Voice recorder encountered an issue: {error}")
 
     if st.session_state.voice_text:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.success("✅ **Transcription Captured**")
+        st.success("✅ Transcription Captured")
         st.info(f'"{st.session_state.voice_text}"')
 
 # -----------------------------
-# Location Data Gathering
+# Location input
 # -----------------------------
-st.write("")
 st.markdown('<div class="section-header">📍 Pinpoint the Location</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="section-caption">Our AI extracts the location from your text, but providing it below guarantees precision.</div>',
-    unsafe_allow_html=True
+    """
+    <div class="section-caption">
+        Enter a location manually for maximum accuracy, or let JanDrishti
+        extract the location from the complaint.
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-loc_col1, loc_col2 = st.columns([3, 2])
-
-with loc_col1:
-    location_input = st.text_input(
-        "Manual Location Override (Optional)",
-        placeholder="e.g., Kothrud, Pune, Maharashtra",
-        help="Leave blank to let our AI auto-detect the location from your story."
-    )
-
-
-
+location_input = st.text_input(
+    "Manual Location Override (Optional)",
+    placeholder="e.g., Kothrud, Pune, Maharashtra",
+    help="Leave blank to let JanDrishti detect a location from your complaint.",
+)
 
 # -----------------------------
-# AI Analysis Execution
+# AI analysis execution
 # -----------------------------
 st.write("")
-st.write("")
-st.write("")
-
 analyze_clicked = st.button(
     "🚀 Initiate AI Analysis",
     type="primary",
@@ -575,12 +510,12 @@ if analyze_clicked:
     request_text = st.session_state.request_text.strip()
 
     if not request_text:
-        st.error("⚠️ Please provide a text description or record a voice note before analyzing.", icon="🚨")
+        st.error("⚠️ Please provide a text description or record a voice note first.")
         st.stop()
 
     with st.status("🧠 Initializing JanDrishti Neural Core...", expanded=True) as status:
         try:
-            st.write("⏳ Parsing natural language logic...")
+            st.write("⏳ Parsing the concern...")
             result = analyze_request(request_text)
             st.write("✅ Contextual analysis generated.")
 
@@ -588,139 +523,179 @@ if analyze_clicked:
                 resolved_input = location_input.strip()
                 location_source = "Manual Override"
             else:
-                resolved_input = result.location
+                resolved_input = str(getattr(result, "location", "")).strip()
                 location_source = "AI Extracted"
 
-            if not resolved_input or resolved_input.strip().lower() == "unknown":
-                status.update(label="📍 Location mapping failed", state="error")
-                st.error("No valid location was detected. Please enter the precise location manually in the field above.")
+            if not resolved_input or resolved_input.lower() == "unknown":
+                status.update(label="📍 Location required", state="error")
+                st.error(
+                    "No valid location was detected. Please enter a precise "
+                    "location in the field above."
+                )
                 st.stop()
 
-            st.write(f"🛰️ Resolving spatial coordinates for: **{resolved_input}**...")
+            st.write(f"🛰️ Resolving spatial coordinates for: **{resolved_input}**")
             location_data = geocode_location(resolved_input)
 
             if location_data is None:
                 status.update(label="❌ Geocoding Failed", state="error")
-                st.error(f"Could not map '{resolved_input}' to coordinates. Please try a broader city or district.")
+                st.error(
+                    f"Could not map '{resolved_input}'. Try a broader city or district."
+                )
                 st.stop()
 
             location_data["input_location"] = resolved_input
             location_data["location_source"] = location_source
 
-        
-            st.write("💾 Committing structured intelligence to database...")
+            st.write("💾 Saving structured intelligence...")
             save_request(result, request_text, location_data)
 
-            status.update(label="✨ Analysis Complete & Stored Successfully!", state="complete")
-            
+            status.update(
+                label="✨ Analysis Complete & Stored Successfully!",
+                state="complete",
+            )
+
             # -------------------------
-            # Comprehensive Results UI
+            # Results UI
             # -------------------------
             st.markdown("---")
-            st.markdown('<div class="section-header">📊 Intelligence Dossier</div>', unsafe_allow_html=True)
-            st.write("")
-            
-            # Custom Metric Grid
-            st.markdown(f"""
-            <div class="ai-metric-grid">
-                <div class="ai-metric">
-                    <div class="metric-dot"></div>
-                    <div class="ai-metric-label">Incident Category</div>
-                    <div class="ai-metric-value">{result.category}</div>
-                </div>
-                <div class="ai-metric">
-                    <div class="metric-dot" style="background: #f43f5e; box-shadow: 0 0 10px #f43f5e;"></div>
-                    <div class="ai-metric-label">Severity Level</div>
-                    <div class="ai-metric-value">{result.severity}</div>
-                </div>
-                <div class="ai-metric">
-                    <div class="metric-dot" style="background: #f59e0b; box-shadow: 0 0 10px #f59e0b;"></div>
-                    <div class="ai-metric-label">Required Urgency</div>
-                    <div class="ai-metric-value">{result.urgency}</div>
-                </div>
-                <div class="ai-metric">
-                    <div class="metric-dot" style="background: #8b5cf6; box-shadow: 0 0 10px #8b5cf6;"></div>
-                    <div class="ai-metric-label">Estimated Impact</div>
-                    <div class="ai-metric-value">{result.affected_population_estimate:,}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(
+                '<div class="section-header">📊 Intelligence Dossier</div>',
+                unsafe_allow_html=True,
+            )
 
-            col_a, col_b = st.columns([1.2, 1])
+            category = safe_text(getattr(result, "category", None))
+            severity = safe_text(getattr(result, "severity", None))
+            urgency = safe_text(getattr(result, "urgency", None))
+            population = population_display(
+                getattr(result, "affected_population_estimate", None)
+            )
 
-            with col_a:
+            st.markdown(
+                f"""
+                <div class="ai-metric-grid">
+                    <div class="ai-metric">
+                        <div class="metric-dot"></div>
+                        <div class="ai-metric-label">Incident Category</div>
+                        <div class="ai-metric-value">{category}</div>
+                    </div>
+                    <div class="ai-metric">
+                        <div class="metric-dot" style="background:#f43f5e; box-shadow:0 0 10px #f43f5e;"></div>
+                        <div class="ai-metric-label">Severity Level</div>
+                        <div class="ai-metric-value">{severity}</div>
+                    </div>
+                    <div class="ai-metric">
+                        <div class="metric-dot" style="background:#f59e0b; box-shadow:0 0 10px #f59e0b;"></div>
+                        <div class="ai-metric-label">Required Urgency</div>
+                        <div class="ai-metric-value">{urgency}</div>
+                    </div>
+                    <div class="ai-metric">
+                        <div class="metric-dot" style="background:#8b5cf6; box-shadow:0 0 10px #8b5cf6;"></div>
+                        <div class="ai-metric-label">Estimated Impact</div>
+                        <div class="ai-metric-value">{population}</div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            details_col, geographic_col = st.columns([1.2, 1])
+
+            with details_col:
                 st.markdown("##### 🧠 Contextual Extraction")
-                st.markdown(f"""
-                <div class="glass-panel">
-                    <div class="info-row"><span class="info-label">Input Lang</span><span class="info-value">{result.language}</span></div>
-                    <div class="info-row"><span class="info-label">Core Problem</span><span class="info-value">{result.problem}</span></div>
-                    <div class="info-row"><span class="info-label">Service Affected</span><span class="info-value">{result.affected_service}</span></div>
-                    <div class="info-row"><span class="info-label">Brief Summary</span><span class="info-value">{result.summary}</span></div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(
+                    f"""
+                    <div class="glass-panel">
+                        <div class="info-row"><span class="info-label">Input Language</span><span class="info-value">{safe_text(getattr(result, "language", None))}</span></div>
+                        <div class="info-row"><span class="info-label">Core Problem</span><span class="info-value">{safe_text(getattr(result, "problem", None))}</span></div>
+                        <div class="info-row"><span class="info-label">Service Affected</span><span class="info-value">{safe_text(getattr(result, "affected_service", None))}</span></div>
+                        <div class="info-row"><span class="info-label">Brief Summary</span><span class="info-value">{safe_text(getattr(result, "summary", None))}</span></div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            with col_b:
+            with geographic_col:
                 st.markdown("##### 📍 Geographic Node")
-                
-                source_color = "#2dd4bf" if location_source == "AI Extracted" else "#8b5cf6"
-                source_icon = "🤖" if location_source == "AI Extracted" else "✍️"
-                
-                st.markdown(f"""
-                <div style="margin-bottom: 15px; padding: 10px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 12px; display: inline-flex; gap: 8px; align-items: center;">
-                    <span>{source_icon}</span>
-                    <span style="color: #94a3b8; font-size: 13px;">Source:</span>
-                    <strong style="color: {source_color};">{location_source} ({resolved_input})</strong>
-                </div>
-                """, unsafe_allow_html=True)
 
-                st.markdown(f"""
-                <div class="glass-panel" style="padding: 24px;">
-                    <div class="info-row"><span class="info-label">Locality / City</span><span class="info-value">{location_data.get('village', 'Unknown')}</span></div>
-                    <div class="info-row"><span class="info-label">District</span><span class="info-value">{location_data.get('district', 'Unknown')}</span></div>
-                    <div class="info-row"><span class="info-label">State Region</span><span class="info-value">{location_data.get('state', 'Unknown')}</span></div>
-                </div>
-                """, unsafe_allow_html=True)
+                source_icon = "✍️" if location_source == "Manual Override" else "🤖"
+                source_color = "#8b5cf6" if location_source == "Manual Override" else "#2dd4bf"
 
-            # Mapping
+                st.markdown(
+                    f"""
+                    <div style="margin-bottom:15px; padding:10px 16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:12px;">
+                        <span>{source_icon}</span>
+                        <span style="color:#94a3b8; font-size:13px;"> Source:</span>
+                        <strong style="color:{source_color};"> {safe_text(location_source)} — {safe_text(resolved_input)}</strong>
+                    </div>
+                    <div class="glass-panel" style="padding:24px;">
+                        <div class="info-row"><span class="info-label">Locality / City</span><span class="info-value">{safe_text(location_data.get("village"))}</span></div>
+                        <div class="info-row"><span class="info-label">District</span><span class="info-value">{safe_text(location_data.get("district"))}</span></div>
+                        <div class="info-row"><span class="info-label">State Region</span><span class="info-value">{safe_text(location_data.get("state"))}</span></div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
             latitude = location_data.get("latitude")
             longitude = location_data.get("longitude")
 
             if latitude is not None and longitude is not None:
-                st.write("")
-                st.markdown(f"##### 🗺️ Spatial Visualization <span style='font-size:14px; font-weight:normal; color:#64748b; margin-left: 10px;'>[{latitude:.6f}, {longitude:.6f}]</span>", unsafe_allow_html=True)
-                # Map styled via CSS overrides earlier
-                st.map({"latitude": [latitude], "longitude": [longitude]}, zoom=11)
+                st.markdown(
+                    f"""
+                    ##### 🗺️ Spatial Visualization
+                    <span style="font-size:14px; font-weight:normal; color:#64748b;">
+                        [{float(latitude):.6f}, {float(longitude):.6f}]
+                    </span>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            st.write("")
+                st.map(
+                    {
+                        "latitude": [float(latitude)],
+                        "longitude": [float(longitude)],
+                    },
+                    zoom=13,
+                )
+
             with st.expander("📄 View Raw Transcription / Source Text", expanded=False):
-                st.markdown(f"<div style='color: #e2e8f0; line-height: 1.6; font-size: 15px;'>{request_text}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='color:#e2e8f0; line-height:1.6;'>{safe_text(request_text)}</div>",
+                    unsafe_allow_html=True,
+                )
 
             with st.expander("💻 Developer Mode: JSON Payload", expanded=False):
-                st.json({
-                    "metadata": {
-                        "status": "success",
-                        "timestamp": "auto-generated"
-                    },
-                    "ai_inference": result.model_dump(),
-                    "spatial_data": location_data,
-                })
+                st.json(
+                    {
+                        "metadata": {
+                            "status": "success",
+                            "timestamp": "auto-generated",
+                        },
+                        "ai_inference": model_to_dict(result),
+                        "spatial_data": location_data,
+                    }
+                )
 
-        except Exception as e:
+        except Exception as error:
             status.update(label="❌ System Exception Intercepted", state="error")
-            st.error("A critical error occurred while parsing the request stream.")
-            st.exception(e)
+            st.error("A critical error occurred while processing the request.")
+            st.exception(error)
 
 # -----------------------------
-# Sleek Footer
+# Footer
 # -----------------------------
-st.markdown("""
-<div style="text-align: center; margin-top: 80px; padding: 40px 0; border-top: 1px solid rgba(255,255,255,0.05);">
-    <div style="font-size: 18px; font-weight: 700; color: #e2e8f0; margin-bottom: 8px;">
-        🇮🇳 JanDrishti AI
+st.markdown(
+    """
+    <div style="text-align:center; margin-top:80px; padding:40px 0; border-top:1px solid rgba(255,255,255,0.05);">
+        <div style="font-size:18px; font-weight:700; color:#e2e8f0; margin-bottom:8px;">
+            🇮🇳 JanDrishti AI
+        </div>
+        <div style="color:#64748b; font-size:14px; line-height:1.6;">
+            Transforming citizen voices into structured civic intelligence.<br>
+            Built for the future of India's infrastructure.
+        </div>
     </div>
-    <div style="color: #64748b; font-size: 14px; line-height: 1.6;">
-        Transforming citizen voices into structured civic intelligence.<br>
-        Built for the future of India's infrastructure.
-    </div>
-</div>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
