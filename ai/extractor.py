@@ -1,118 +1,91 @@
+import os
+
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
-from typing import Literal
-import os
 
 
-class CitizenRequest(BaseModel):
-
-    language: str = Field(
-        description="Language used by the citizen"
+class ComplaintAnalysis(BaseModel):
+    category: str = Field(
+        description="Infrastructure issue category, for example Roads or Water Supply."
     )
-
-    category: Literal[
-        "Roads",
-        "Water",
-        "Healthcare",
-        "Education",
-        "Electricity",
-        "Sanitation",
-        "Public Transport",
-        "Internet Connectivity",
-        "Agriculture",
-        "Housing",
-        "Other"
-    ]
-
-    problem: str = Field(
-        description="Short description of the infrastructure problem"
+    severity: str = Field(
+        description="Low, Medium, High, or Critical."
     )
-
-    location: str = Field(
-        description="Location mentioned by the citizen. Return 'Unknown' if absent."
+    urgency: str = Field(
+        description="Routine, Soon, Urgent, or Immediate."
     )
-
-    severity: Literal[
-        "Low",
-        "Medium",
-        "High",
-        "Critical"
-    ]
-
-    urgency: Literal[
-        "Low",
-        "Medium",
-        "High",
-        "Critical"
-    ]
-
-    affected_service: str = Field(
-        description="Public service affected by the problem"
-    )
-
     affected_population_estimate: int = Field(
-        description="Estimated number of people affected if possible, otherwise 0"
+        description="Estimated number of people affected."
     )
-
+    language: str = Field(
+        description="Language used by the citizen."
+    )
+    problem: str = Field(
+        description="The main infrastructure problem."
+    )
+    affected_service: str = Field(
+        description="Public service or infrastructure affected."
+    )
     summary: str = Field(
-        description="One sentence summary of the citizen's request"
+        description="Short, clear summary of the complaint."
+    )
+    location: str = Field(
+        description="Specific locality, city, district, or state mentioned. Use Unknown only when absent."
     )
 
 
-def analyze_request(text: str) -> CitizenRequest:
+def analyze_request(request_text: str) -> ComplaintAnalysis:
+    """
+    Convert a citizen complaint into structured JanDrishti intelligence.
+    No audio recording logic belongs in this file.
+    """
+    if not request_text or not request_text.strip():
+        raise ValueError("Complaint text cannot be empty.")
 
     api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
         raise ValueError(
-            "GEMINI_API_KEY is not configured."
+            "GEMINI_API_KEY is missing. Add it to your .env file or Render environment variables."
         )
 
-    client = genai.Client(
-        api_key=api_key
-    )
+    client = genai.Client(api_key=api_key)
 
     prompt = f"""
-You are JanDrishti AI, an Indian public infrastructure
-intelligence system.
+You are JanDrishti AI, an Indian civic infrastructure complaint analyst.
 
-Analyze the citizen's development request.
+Analyze this citizen complaint and return only structured data matching the required schema.
 
-The citizen may write in Hindi, Marathi, English,
-or another Indian language.
+Complaint:
+{request_text}
 
-Do NOT invent information.
-
-If location is not explicitly available,
-return "Unknown".
-
-If affected population cannot be estimated
-from the request, return 0.
-
-Classify the request into the closest
-available category.
-
-Citizen request:
-
-{text}
+Rules:
+- Identify the most relevant infrastructure category.
+- Severity must be one of: Low, Medium, High, Critical.
+- Urgency must be one of: Routine, Soon, Urgent, Immediate.
+- Estimate affected population conservatively as an integer.
+- Preserve the complaint language.
+- Extract the most specific location mentioned.
+- If no location is present, return "Unknown".
+- Do not invent addresses, villages, districts, or states.
 """
 
-    response = client.models.generate_content(
-
-        model="gemini-3.6-flash",
-
-        contents=prompt,
-
-        config=types.GenerateContentConfig(
-
-            response_mime_type="application/json",
-
-            response_schema=
-                CitizenRequest.model_json_schema()
+    try:
+        response = client.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=ComplaintAnalysis,
+                temperature=0.2,
+            ),
         )
-    )
 
-    return CitizenRequest.model_validate_json(
-        response.text
-    )
+        if response.parsed:
+            return response.parsed
+
+        return ComplaintAnalysis.model_validate_json(response.text)
+
+    except Exception as error:
+        raise RuntimeError(f"AI analysis failed: {error}") from error
