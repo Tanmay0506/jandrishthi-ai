@@ -1,223 +1,204 @@
 import requests
-import time
-from urllib.parse import quote
 
 
-# --------------------------------------------------
-# Nominatim Configuration
-# --------------------------------------------------
-
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-
-HEADERS = {
-    "User-Agent": (
-        "JanDrishti-AI/1.0 "
-        "(Citizen Infrastructure Intelligence Platform)"
-    ),
-    "Accept": "application/json",
-    "Accept-Language": "en-IN,en;q=0.9",
-}
+NOMINATIM_URL = "https://nominatim.openstreetmap.org"
 
 
-# --------------------------------------------------
-# Geocode Location
-# --------------------------------------------------
-
-def geocode_location(location_name: str):
+def _extract_location(result, latitude, longitude):
     """
-    Convert a location name into latitude/longitude
-    and administrative information using OpenStreetMap
-    Nominatim.
-
-    Designed to work reliably on cloud deployments
-    such as Render and Streamlit Cloud.
+    Convert Nominatim response into a clean JanDrishti location object.
     """
 
-    if not location_name:
+    if not result:
         return None
 
-    location_name = str(location_name).strip()
+    address = result.get("address", {})
 
-    if not location_name:
-        return None
+    village = (
+        address.get("village")
+        or address.get("town")
+        or address.get("city")
+        or address.get("municipality")
+        or address.get("suburb")
+        or address.get("neighbourhood")
+        or "Unknown"
+    )
 
-    # --------------------------------------------------
-    # Improve Indian location searches
-    # --------------------------------------------------
+    sub_district = (
+        address.get("subdistrict")
+        or address.get("tehsil")
+        or address.get("taluk")
+        or address.get("township")
+        or address.get("municipality")
+        or "Unknown"
+    )
 
-    search_query = location_name
+    district = (
+        address.get("county")
+        or address.get("district")
+        or "Unknown"
+    )
 
-    # If user hasn't specified India, bias search toward India.
-    if "india" not in location_name.lower():
-        search_query = f"{location_name}, India"
+    state = address.get(
+        "state",
+        "Unknown"
+    )
 
-    params = {
-        "q": search_query,
-        "format": "jsonv2",
-        "addressdetails": 1,
-        "limit": 1,
-        "countrycodes": "in",
-        "accept-language": "en",
+    country = address.get(
+        "country",
+        "India"
+    )
+
+    return {
+        "latitude": float(latitude),
+        "longitude": float(longitude),
+
+        "village": village,
+
+        "sub_district": sub_district,
+
+        "district": district,
+
+        "state": state,
+
+        "country": country,
+
+        "display_name": result.get(
+            "display_name",
+            "GPS Location"
+        ),
     }
 
-    # --------------------------------------------------
-    # Retry mechanism
-    # --------------------------------------------------
 
-    max_retries = 3
+# ============================================================
+# GPS → LOCATION
+# ============================================================
 
-    for attempt in range(max_retries):
+def reverse_geocode(latitude, longitude):
+    """
+    Convert GPS latitude/longitude into:
+    village, sub-district, district and state.
+    """
 
-        try:
+    if latitude is None or longitude is None:
+        return None
 
-            response = requests.get(
-                NOMINATIM_URL,
-                params=params,
-                headers=HEADERS,
-                timeout=(5, 20),
+    try:
+
+        latitude = float(latitude)
+        longitude = float(longitude)
+
+        headers = {
+            "User-Agent": (
+                "JanDrishti-AI/1.0 "
+                "(citizen infrastructure mapping)"
             )
+        }
 
-            # --------------------------------------------------
-            # Rate limited
-            # --------------------------------------------------
+        params = {
+            "lat": latitude,
+            "lon": longitude,
+            "format": "json",
+            "addressdetails": 1,
+            "zoom": 18
+        }
 
-            if response.status_code == 429:
+        response = requests.get(
+            f"{NOMINATIM_URL}/reverse",
+            params=params,
+            headers=headers,
+            timeout=20
+        )
 
-                # Wait before retrying
-                time.sleep(2 + attempt * 2)
+        response.raise_for_status()
 
-                continue
+        result = response.json()
 
-            # --------------------------------------------------
-            # Server temporarily unavailable
-            # --------------------------------------------------
+        return _extract_location(
+            result,
+            latitude,
+            longitude
+        )
 
-            if response.status_code in (500, 502, 503, 504):
+    except Exception as e:
 
-                time.sleep(2 + attempt * 2)
+        print(
+            "Reverse geocoding error:",
+            str(e)
+        )
 
-                continue
+        return None
 
-            response.raise_for_status()
 
-            # --------------------------------------------------
-            # Parse JSON
-            # --------------------------------------------------
+# ============================================================
+# TEXT → LOCATION
+# ============================================================
 
-            results = response.json()
+def geocode_location(location_name):
+    """
+    Convert manually entered location into coordinates.
+    """
 
-            if not results:
-                return None
+    if not location_name:
+        return None
 
-            result = results[0]
+    location_name = location_name.strip()
 
-            # --------------------------------------------------
-            # Coordinates
-            # --------------------------------------------------
+    if not location_name:
+        return None
 
-            latitude = result.get("lat")
-            longitude = result.get("lon")
+    try:
 
-            if latitude is None or longitude is None:
-                return None
-
-            latitude = float(latitude)
-            longitude = float(longitude)
-
-            # --------------------------------------------------
-            # Address information
-            # --------------------------------------------------
-
-            address = result.get("address", {})
-
-            village = (
-                address.get("village")
-                or address.get("hamlet")
-                or address.get("town")
-                or address.get("city")
-                or address.get("municipality")
-                or address.get("suburb")
-                or address.get("neighbourhood")
-                or "Unknown"
+        headers = {
+            "User-Agent": (
+                "JanDrishti-AI/1.0 "
+                "(citizen infrastructure mapping)"
             )
+        }
 
-            district = (
-                address.get("state_district")
-                or address.get("district")
-                or address.get("county")
-                or "Unknown"
-            )
+        params = {
+            "q": location_name,
+            "format": "json",
+            "addressdetails": 1,
+            "limit": 1,
+            "countrycodes": "in"
+        }
 
-            state = (
-                address.get("state")
-                or address.get("state_district")
-                or "Unknown"
-            )
+        response = requests.get(
+            f"{NOMINATIM_URL}/search",
+            params=params,
+            headers=headers,
+            timeout=20
+        )
 
-            country = (
-                address.get("country")
-                or "India"
-            )
+        response.raise_for_status()
 
-            postcode = (
-                address.get("postcode")
-                or "Unknown"
-            )
+        results = response.json()
 
-            # --------------------------------------------------
-            # Return structured result
-            # --------------------------------------------------
-
-            return {
-                "latitude": latitude,
-                "longitude": longitude,
-
-                "village": village,
-
-                "district": district,
-
-                "state": state,
-
-                "country": country,
-
-                "postcode": postcode,
-
-                "display_name": result.get(
-                    "display_name",
-                    location_name
-                ),
-            }
-
-        # --------------------------------------------------
-        # Network errors
-        # --------------------------------------------------
-
-        except requests.exceptions.Timeout:
-
-            if attempt < max_retries - 1:
-                time.sleep(2)
-                continue
-
+        if not results:
             return None
 
-        except requests.exceptions.ConnectionError:
+        result = results[0]
 
-            if attempt < max_retries - 1:
-                time.sleep(2)
-                continue
+        latitude = float(
+            result["lat"]
+        )
 
-            return None
+        longitude = float(
+            result["lon"]
+        )
 
-        except requests.exceptions.RequestException:
+        return _extract_location(
+            result,
+            latitude,
+            longitude
+        )
 
-            return None
+    except Exception as e:
 
-        # --------------------------------------------------
-        # Invalid response
-        # --------------------------------------------------
+        print(
+            "Geocoding error:",
+            str(e)
+        )
 
-        except (ValueError, KeyError, TypeError):
-
-            return None
-
-    return None
+        return None
