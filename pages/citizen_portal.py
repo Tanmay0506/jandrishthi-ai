@@ -2,6 +2,7 @@ import html
 
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit_geolocation import streamlit_geolocation
 from streamlit_mic_recorder import speech_to_text
 
 from ai.extractor import analyze_request
@@ -25,20 +26,21 @@ st.set_page_config(
 for key, default_value in {
     "request_text": "",
     "voice_text": "",
+    "precise_location": None,
 }.items():
     if key not in st.session_state:
         st.session_state[key] = default_value
 
 
 def safe_text(value, fallback="Unknown"):
-    """Safely render text values inside custom HTML."""
+    """Escape values before placing them inside HTML."""
     if value is None or str(value).strip() == "":
         value = fallback
     return html.escape(str(value))
 
 
 def model_to_dict(result):
-    """Support Pydantic v1 and v2 models."""
+    """Support Pydantic v1 and v2 response models."""
     if hasattr(result, "model_dump"):
         return result.model_dump()
     if hasattr(result, "dict"):
@@ -47,15 +49,31 @@ def model_to_dict(result):
 
 
 def population_display(value):
-    """Prevent formatting errors if the AI returns non-numeric data."""
+    """Prevent formatting errors from non-numeric AI output."""
     try:
         return f"{int(value):,}"
     except (TypeError, ValueError):
         return safe_text(value, "Not available")
 
 
+def create_gps_location_data(gps_data):
+    """Keep browser GPS data compatible with your existing database logic."""
+    latitude = float(gps_data["latitude"])
+    longitude = float(gps_data["longitude"])
+
+    return {
+        "latitude": latitude,
+        "longitude": longitude,
+        "village": "Precise GPS location",
+        "district": "Unknown",
+        "state": "Unknown",
+        "country": "India",
+        "display_name": f"{latitude:.6f}, {longitude:.6f}",
+    }
+
+
 # -----------------------------
-# Premium Dark CSS
+# Premium dark UI
 # -----------------------------
 st.markdown(
     """
@@ -477,23 +495,61 @@ with tab_voice:
         st.info(f'"{st.session_state.voice_text}"')
 
 # -----------------------------
-# Location input
+# Location selection
 # -----------------------------
 st.markdown('<div class="section-header">📍 Pinpoint the Location</div>', unsafe_allow_html=True)
 st.markdown(
     """
     <div class="section-caption">
-        Enter a location manually for maximum accuracy, or let JanDrishti
-        extract the location from the complaint.
+        Use precise current location for GPS coordinates, enter a location manually,
+        or let JanDrishti extract it from your complaint.
     </div>
     """,
     unsafe_allow_html=True,
 )
 
+use_precise_location = st.checkbox(
+    "🎯 Use precise current location",
+    value=False,
+)
+
+if use_precise_location:
+    try:
+        detected_location = streamlit_geolocation()
+
+        if (
+            isinstance(detected_location, dict)
+            and detected_location.get("latitude") is not None
+            and detected_location.get("longitude") is not None
+        ):
+            st.session_state.precise_location = {
+                "latitude": detected_location["latitude"],
+                "longitude": detected_location["longitude"],
+                "accuracy": detected_location.get("accuracy"),
+            }
+
+    except Exception:
+        st.session_state.precise_location = None
+
+    if st.session_state.precise_location:
+        latitude = float(st.session_state.precise_location["latitude"])
+        longitude = float(st.session_state.precise_location["longitude"])
+        accuracy = st.session_state.precise_location.get("accuracy")
+
+        accuracy_text = ""
+        if accuracy is not None:
+            accuracy_text = f" · Accuracy: approximately {float(accuracy):.0f} m"
+
+        st.success(
+            f"✓ Precise coordinates captured: {latitude:.6f}, {longitude:.6f}"
+            f"{accuracy_text}"
+        )
+
 location_input = st.text_input(
     "Manual Location Override (Optional)",
     placeholder="e.g., Kothrud, Pune, Maharashtra",
-    help="Leave blank to let JanDrishti detect a location from your complaint.",
+    help="Leave blank to use precise location or AI location extraction.",
+    disabled=use_precise_location,
 )
 
 # -----------------------------
@@ -519,30 +575,49 @@ if analyze_clicked:
             result = analyze_request(request_text)
             st.write("✅ Contextual analysis generated.")
 
-            if location_input.strip():
-                resolved_input = location_input.strip()
-                location_source = "Manual Override"
+            # GPS path: coordinates are used directly. No geocoding call is made.
+            if use_precise_location:
+                gps_data = st.session_state.precise_location
+
+                if not gps_data:
+                    status.update(label="📍 Precise location required", state="error")
+                    st.error(
+                        "Tap the location button, allow browser location access, "
+                        "then start the analysis again."
+                    )
+                    st.stop()
+
+                location_data = create_gps_location_data(gps_data)
+                resolved_input = location_data["display_name"]
+                location_source = "Precise Current Location"
+
+            # Manual/AI path: uses your existing geocoding.py
             else:
-                resolved_input = str(getattr(result, "location", "")).strip()
-                location_source = "AI Extracted"
+                if location_input.strip():
+                    resolved_input = location_input.strip()
+                    location_source = "Manual Override"
+                else:
+                    resolved_input = str(getattr(result, "location", "")).strip()
+                    location_source = "AI Extracted"
 
-            if not resolved_input or resolved_input.lower() == "unknown":
-                status.update(label="📍 Location required", state="error")
-                st.error(
-                    "No valid location was detected. Please enter a precise "
-                    "location in the field above."
-                )
-                st.stop()
+                if not resolved_input or resolved_input.lower() == "unknown":
+                    status.update(label="📍 Location required", state="error")
+                    st.error(
+                        "No valid location was detected. Enter a precise location "
+                        "or use precise current location."
+                    )
+                    st.stop()
 
-            st.write(f"🛰️ Resolving spatial coordinates for: **{resolved_input}**")
-            location_data = geocode_location(resolved_input)
+                st.write(f"🛰️ Resolving spatial coordinates for: **{resolved_input}**")
+                location_data = geocode_location(resolved_input)
 
-            if location_data is None:
-                status.update(label="❌ Geocoding Failed", state="error")
-                st.error(
-                    f"Could not map '{resolved_input}'. Try a broader city or district."
-                )
-                st.stop()
+                if location_data is None:
+                    status.update(label="❌ Geocoding Failed", state="error")
+                    st.error(
+                        f"Could not map '{resolved_input}'. Use precise current "
+                        "location or try a broader city or district."
+                    )
+                    st.stop()
 
             location_data["input_location"] = resolved_input
             location_data["location_source"] = location_source
@@ -618,15 +693,22 @@ if analyze_clicked:
             with geographic_col:
                 st.markdown("##### 📍 Geographic Node")
 
-                source_icon = "✍️" if location_source == "Manual Override" else "🤖"
-                source_color = "#8b5cf6" if location_source == "Manual Override" else "#2dd4bf"
+                source_styles = {
+                    "Precise Current Location": ("🎯", "#2dd4bf"),
+                    "Manual Override": ("✍️", "#8b5cf6"),
+                    "AI Extracted": ("🤖", "#60a5fa"),
+                }
+                source_icon, source_color = source_styles.get(
+                    location_source,
+                    ("📍", "#2dd4bf"),
+                )
 
                 st.markdown(
                     f"""
                     <div style="margin-bottom:15px; padding:10px 16px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius:12px;">
                         <span>{source_icon}</span>
                         <span style="color:#94a3b8; font-size:13px;"> Source:</span>
-                        <strong style="color:{source_color};"> {safe_text(location_source)} — {safe_text(resolved_input)}</strong>
+                        <strong style="color:{source_color};"> {safe_text(location_source)}</strong>
                     </div>
                     <div class="glass-panel" style="padding:24px;">
                         <div class="info-row"><span class="info-label">Locality / City</span><span class="info-value">{safe_text(location_data.get("village"))}</span></div>
@@ -656,7 +738,7 @@ if analyze_clicked:
                         "latitude": [float(latitude)],
                         "longitude": [float(longitude)],
                     },
-                    zoom=13,
+                    zoom=15,
                 )
 
             with st.expander("📄 View Raw Transcription / Source Text", expanded=False):
