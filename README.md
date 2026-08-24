@@ -88,12 +88,8 @@ jandrishthi-ai/
 │   └── voice.py
 │
 ├── data/
-│   ├── district_master.csv
-│   ├── generate_data.py
 │   ├── national_infrastructure.csv
-│   │
-│   └── external/
-│       └── development_indicators.csv
+
 │
 ├── database/
 │   ├── database.py
