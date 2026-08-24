@@ -85,7 +85,6 @@ jandrishthi-ai/
 ├── ai/
 │   ├── extractor.py
 │   ├── recommender.py
-│   └── voice.py
 │
 ├── data/
 │   ├── national_infrastructure.csv
@@ -102,8 +101,6 @@ jandrishthi-ai/
 └── utils/
     ├── __init__.py
     ├── analytics.py
-    ├── development.py
-    ├── districts.py
     ├── geocoding.py
     ├── hotspots.py
     ├── national_data.py
